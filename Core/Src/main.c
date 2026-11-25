@@ -22,6 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stepper.h"
+#include "cmd_parser.h"
 
 /* USER CODE END Includes */
 
@@ -98,6 +100,8 @@ int main(void)
   MX_TIM9_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  stepper_init();
+  cmd_init();
 
   /* USER CODE END 2 */
 
@@ -108,6 +112,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    cmd_poll();
   }
   /* USER CODE END 3 */
 }

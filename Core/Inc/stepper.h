@@ -59,4 +59,19 @@ int32_t stepper_get_pos(uint8_t axis);
   */
 uint8_t stepper_take_done(uint8_t axis);
 
+/** Частота последнего запущенного движения, Гц (0, если движений не было). */
+uint32_t stepper_get_freq(uint8_t axis);
+
+/** Сколько импульсов осталось до конца текущего движения. */
+uint32_t stepper_get_remaining(uint8_t axis);
+
+/**
+  * Направление последнего движения (1 = CW/pos растёт, 0 = CCW).
+  * Результат имеет смысл, только если stepper_has_dir() == 1.
+  */
+uint8_t stepper_get_dir(uint8_t axis);
+
+/** 1, если с момента включения драйвера оси было хотя бы одно движение. */
+uint8_t stepper_has_dir(uint8_t axis);
+
 #endif /* STEPPER_H */

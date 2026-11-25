@@ -41,6 +41,8 @@ typedef struct {
   volatile uint8_t  busy;
   volatile uint8_t  done;        /* флаг штатного завершения */
   volatile uint8_t  dir;
+  volatile uint8_t  dir_valid;   /* было движение с момента включения */
+  volatile uint32_t freq;        /* Гц последнего движения */
   uint8_t           enabled;
 } axis_state_t;
 
@@ -73,6 +75,8 @@ void stepper_init(void)
     st[a].busy      = 0;
     st[a].done      = 0;
     st[a].dir       = 0;
+    st[a].dir_valid = 0;
+    st[a].freq      = 0;
     st[a].enabled   = 0;
   }
 }
@@ -95,6 +99,7 @@ stepper_status_t stepper_disable(uint8_t axis)
   (void)stepper_stop(axis);
   HAL_GPIO_WritePin(hw[axis].en_port, hw[axis].en_pin, GPIO_PIN_SET);
   st[axis].enabled = 0;
+  st[axis].dir_valid = 0;
   return STEPPER_OK;
 }
 
@@ -136,6 +141,8 @@ stepper_status_t stepper_move(uint8_t axis, uint32_t steps, uint8_t dir, uint32_
   }
 
   st[axis].dir       = dir;
+  st[axis].dir_valid = 1;
+  st[axis].freq      = freq_hz;
   st[axis].remaining = steps;
   st[axis].done      = 0;
   st[axis].busy      = 1;
@@ -187,6 +194,26 @@ uint8_t stepper_is_enabled(uint8_t axis)
 int32_t stepper_get_pos(uint8_t axis)
 {
   return (axis < STEPPER_AXES) ? st[axis].pos : 0;
+}
+
+uint32_t stepper_get_freq(uint8_t axis)
+{
+  return (axis < STEPPER_AXES) ? st[axis].freq : 0U;
+}
+
+uint32_t stepper_get_remaining(uint8_t axis)
+{
+  return (axis < STEPPER_AXES) ? st[axis].remaining : 0U;
+}
+
+uint8_t stepper_get_dir(uint8_t axis)
+{
+  return (axis < STEPPER_AXES) ? st[axis].dir : 0U;
+}
+
+uint8_t stepper_has_dir(uint8_t axis)
+{
+  return (axis < STEPPER_AXES) ? st[axis].dir_valid : 0U;
 }
 
 uint8_t stepper_take_done(uint8_t axis)

@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "stepper.h"
 #include "cmd_parser.h"
+#include "lcd_status.h"
 
 /* USER CODE END Includes */
 
@@ -102,6 +103,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   stepper_init();
   cmd_init();
+  (void)lcd_status_init();
 
   /* USER CODE END 2 */
 
@@ -113,6 +115,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     cmd_poll();
+    lcd_status_update();
   }
   /* USER CODE END 3 */
 }

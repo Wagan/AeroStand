@@ -98,6 +98,20 @@ stepper_status_t stepper_set_zero(uint8_t axis);
   */
 stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t freq_hz);
 
+/**
+  * То же, что stepper_move_to_angle, но без уведомления "завершено"
+  * (stepper_take_done не выставляется): для сценария, который шлёт много
+  * коротких движений.
+  */
+stepper_status_t stepper_move_to_angle_quiet(uint8_t axis, float angle_deg, uint32_t freq_hz);
+
+/**
+  * Сколько шагов (со знаком) осталось до угла angle_deg от текущей позиции
+  * с учётом калибровки и нуля. Проверок пределов нет; при неверной оси или
+  * слишком большой цели возвращает 0.
+  */
+int32_t stepper_steps_to_angle(uint8_t axis, float angle_deg);
+
 /** Текущий угол, градусы: (pos - zero_offset) / steps_per_degree. */
 float stepper_get_angle(uint8_t axis);
 

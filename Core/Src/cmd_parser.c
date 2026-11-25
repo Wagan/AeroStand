@@ -6,6 +6,7 @@
 #include "stepper.h"
 #include "usbd_cdc_if.h"
 #include "fmt.h"
+#include "scenario.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,6 +120,32 @@ static void reply_stepper_err(stepper_status_t s)
   }
 }
 
+static void reply_scenario(scenario_status_t s)
+{
+  switch (s) {
+    case SCENARIO_OK:
+      tx_put("OK\n");
+      break;
+    case SCENARIO_ERR_FULL:  reply_err("FULL");  break;
+    case SCENARIO_ERR_EMPTY: reply_err("EMPTY"); break;
+    case SCENARIO_ERR_VALUE: reply_err("VALUE"); break;
+    case SCENARIO_ERR_BUSY:  reply_err("BUSY");  break;
+    case SCENARIO_ERR_LIMIT: {
+      float lo, hi;
+      char a1[16], a2[16], a3[16], buf[80];
+      uint8_t ax = scenario_get_error_axis();
+      stepper_get_limits(ax, &lo, &hi);
+      fmt_fixed(a1, sizeof(a1), scenario_get_error_angle(), 2U, 0);
+      fmt_fixed(a2, sizeof(a2), lo, 2U, 0);
+      fmt_fixed(a3, sizeof(a3), hi, 2U, 0);
+      (void)snprintf(buf, sizeof(buf), "ERR LIMIT %u %s %s %s\n", (unsigned)ax, a1, a2, a3);
+      tx_put(buf);
+      break;
+    }
+    default: reply_err("INTERNAL"); break;
+  }
+}
+
 /* ---- Разбор --------------------------------------------------------------- */
 
 /* Целое число строго по всей строке токена. 0 - ошибка. */
@@ -226,6 +253,14 @@ void cmd_execute(char *line)
                      (unsigned)stepper_is_busy(a), (long)stepper_get_pos(a), ang);
       tx_put(buf);
     }
+    {
+      char buf[48];
+      (void)snprintf(buf, sizeof(buf), "SCENARIO %s %lu %lu\n",
+                     scenario_is_running() ? "PLAYING" : "IDLE",
+                     (unsigned long)scenario_count(),
+                     (unsigned long)scenario_get_time_ms());
+      tx_put(buf);
+    }
   }
   else if (strcmp(cmd, "ENABLE") == 0 || strcmp(cmd, "DISABLE") == 0 || strcmp(cmd, "STOP") == 0) {
     if (n != 2U) { reply_err("ARGS"); return; }
@@ -310,6 +345,37 @@ void cmd_execute(char *line)
     stepper_status_t s = stepper_set_zero(axis);
     if (s == STEPPER_OK) { tx_put("OK\n"); } else { reply_stepper_err(s); }
   }
+  else if (strcmp(cmd, "SCLEAR") == 0) {
+    if (n != 1U) { reply_err("ARGS"); return; }
+    reply_scenario(scenario_clear());
+  }
+  else if (strcmp(cmd, "SKEY") == 0) {
+    long  t;
+    float ang[STEPPER_AXES];
+    if (n != 5U) { reply_err("ARGS"); return; }
+    if (!parse_long(tok[1], &t) || t < 0 ||
+        !parse_float(tok[2], &ang[0]) || !parse_float(tok[3], &ang[1]) ||
+        !parse_float(tok[4], &ang[2])) {
+      reply_err("VALUE");
+      return;
+    }
+    reply_scenario(scenario_add_keyframe((uint32_t)t, ang[0], ang[1], ang[2]));
+  }
+  else if (strcmp(cmd, "SRUN") == 0) {
+    if (n != 1U) { reply_err("ARGS"); return; }
+    reply_scenario(scenario_start());
+  }
+  else if (strcmp(cmd, "SSTOP") == 0) {
+    if (n != 1U) { reply_err("ARGS"); return; }
+    scenario_stop();
+    tx_put("OK\n");
+  }
+  else if (strcmp(cmd, "SCOUNT") == 0) {
+    char buf[24];
+    if (n != 1U) { reply_err("ARGS"); return; }
+    (void)snprintf(buf, sizeof(buf), "SCOUNT %lu\n", (unsigned long)scenario_count());
+    tx_put(buf);
+  }
   else {
     reply_err("UNKNOWN COMMAND");
   }
@@ -351,6 +417,13 @@ void cmd_poll(void)
     }
   }
 
-  /* 3. Передача. */
+  /* 3. События сценария. */
+  switch (scenario_take_event()) {
+    case SCENARIO_EVENT_DONE:  tx_put("SCENARIO DONE\n");  break;
+    case SCENARIO_EVENT_ABORT: tx_put("SCENARIO ABORT\n"); break;
+    default: break;
+  }
+
+  /* 4. Передача. */
   tx_pump();
 }

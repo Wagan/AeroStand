@@ -25,6 +25,7 @@
 #include "stepper.h"
 #include "cmd_parser.h"
 #include "lcd_status.h"
+#include "scenario.h"
 
 /* USER CODE END Includes */
 
@@ -115,6 +116,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     cmd_poll();
+    scenario_update();
     lcd_status_update();
   }
   /* USER CODE END 3 */

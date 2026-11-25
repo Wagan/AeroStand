@@ -4,7 +4,8 @@
   *
   * Раскладка (Font16: 11x16 px, 21 символ в строке):
   *
-  *   y=6    "AeroStand v0.1"   (Font20, по центру)
+  *   y=6    "AeroStand v0.1"   (Font20, по центру);
+  *          при воспроизведении сценария "AeroStand v0.1  PLAY 03.2s" (Font12)
   *   y=30   ----------------
   *   y=36+86*k  Axis k  <ENABLED|DISABLED>  <IDLE|MOVING|--->
   *   y+22       ang:<+15.3> pos:<+306>   (угол, град; позиция, шаги)
@@ -15,6 +16,7 @@
 #include "lcd_status.h"
 #include "stepper.h"
 #include "fmt.h"
+#include "scenario.h"
 #include "main.h"
 #include "usbd_def.h"
 #include "stm32f429i_discovery_lcd.h"
@@ -54,7 +56,7 @@ extern USBD_HandleTypeDef hUsbDeviceHS;
 #define X_RUN           (MARGIN_X + 4U * CHAR_W)     /* 3-я строка: freq/rem */
 #define X_USB           (MARGIN_X + 5U * CHAR_W)     /* после "USB: " */
 
-#define FIELD_MAX       24U
+#define FIELD_MAX       32U
 
 /* Кэш показанного значения поля: перерисовка только при изменении. */
 typedef struct {
@@ -68,6 +70,8 @@ enum { F_DRV, F_MOT, F_ANG, F_POS, F_DIR, F_RUN, F_COUNT };
 
 static field_t  axis_f[STEPPER_AXES][F_COUNT];
 static field_t  usb_f;
+static field_t  hdr_f;
+static uint8_t  hdr_play;          /* 0 - обычный заголовок, 1 - PLAY */
 static uint8_t  lcd_ok;
 static uint32_t last_tick;
 
@@ -132,6 +136,36 @@ static void draw_frame(void)
 
   memset(axis_f, 0, sizeof(axis_f));
   memset(&usb_f, 0, sizeof(usb_f));
+  memset(&hdr_f, 0, sizeof(hdr_f));
+  hdr_play = 0;
+}
+
+/* Заголовок: обычный (Font20) либо "AeroStand v0.1  PLAY SS.Ts" (Font12) во время сценария. */
+static void update_header(void)
+{
+  uint8_t play = scenario_is_running();
+
+  if (play != hdr_play) {
+    hdr_play = play;
+    memset(&hdr_f, 0, sizeof(hdr_f));
+    BSP_LCD_SetTextColor(COLOR_BG);
+    BSP_LCD_FillRect(0, 0, BSP_LCD_GetXSize(), SEP_TOP_Y - 2U);
+    if (!play) {
+      BSP_LCD_SetFont(&Font20);
+      BSP_LCD_SetTextColor(COLOR_TITLE);
+      BSP_LCD_DisplayStringAt(0, 6, (uint8_t *)"AeroStand v0.1", CENTER_MODE);
+      BSP_LCD_SetFont(FONT);
+    }
+  }
+  if (play) {
+    char buf[FIELD_MAX + 1U];
+    uint32_t t = scenario_get_time_ms();
+    (void)snprintf(buf, sizeof(buf), "AeroStand v0.1  PLAY %02lu.%lus",
+                   (unsigned long)(t / 1000U), (unsigned long)((t % 1000U) / 100U));
+    BSP_LCD_SetFont(&Font12);
+    draw_field(&hdr_f, 4U, 10U, 28U, COLOR_TITLE, buf);
+    BSP_LCD_SetFont(FONT);
+  }
 }
 
 uint8_t lcd_status_init(void)
@@ -207,6 +241,7 @@ void lcd_status_update(void)
 
   BSP_LCD_SetFont(FONT);
   BSP_LCD_SetBackColor(COLOR_BG);
+  update_header();
   for (uint8_t a = 0; a < STEPPER_AXES; a++) {
     update_axis(a);
   }

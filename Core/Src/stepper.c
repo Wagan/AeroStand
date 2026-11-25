@@ -44,6 +44,7 @@ typedef struct {
   volatile uint8_t  done;        /* флаг штатного завершения */
   volatile uint8_t  dir;
   volatile uint8_t  dir_valid;   /* было движение с момента включения */
+  volatile uint8_t  notify;      /* по завершении выставлять done */
   volatile uint32_t freq;        /* Гц последнего движения */
   uint8_t           enabled;
   /* Калибровка (только RAM). */
@@ -114,7 +115,7 @@ stepper_status_t stepper_disable(uint8_t axis)
   return STEPPER_OK;
 }
 
-stepper_status_t stepper_move(uint8_t axis, uint32_t steps, uint8_t dir, uint32_t freq_hz)
+static stepper_status_t move_impl(uint8_t axis, uint32_t steps, uint8_t dir, uint32_t freq_hz, uint8_t notify)
 {
   if (axis >= STEPPER_AXES) {
     return STEPPER_ERR_AXIS;
@@ -156,6 +157,7 @@ stepper_status_t stepper_move(uint8_t axis, uint32_t steps, uint8_t dir, uint32_
   st[axis].freq      = freq_hz;
   st[axis].remaining = steps;
   st[axis].done      = 0;
+  st[axis].notify    = notify;
   st[axis].busy      = 1;
 
   /* Канал выключен: безопасно менять PSC/ARR/CCR и сбросить счётчик (UG). */
@@ -173,6 +175,11 @@ stepper_status_t stepper_move(uint8_t axis, uint32_t steps, uint8_t dir, uint32_
     return STEPPER_ERR_BUSY;
   }
   return STEPPER_OK;
+}
+
+stepper_status_t stepper_move(uint8_t axis, uint32_t steps, uint8_t dir, uint32_t freq_hz)
+{
+  return move_impl(axis, steps, dir, freq_hz, 1U);
 }
 
 uint8_t stepper_is_busy(uint8_t axis)
@@ -303,7 +310,7 @@ void stepper_get_limits(uint8_t axis, float *min_deg, float *max_deg)
   }
 }
 
-stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t freq_hz)
+static stepper_status_t angle_impl(uint8_t axis, float angle_deg, uint32_t freq_hz, uint8_t notify)
 {
   if (axis >= STEPPER_AXES) {
     return STEPPER_ERR_AXIS;
@@ -332,7 +339,7 @@ stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t f
     /* Уже в цели: импульсов нет, но завершение подтверждаем (OK + DONE). */
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
-    st[axis].done = 1;
+    st[axis].done = notify;
     __set_PRIMASK(primask);
     return STEPPER_OK;
   }
@@ -340,7 +347,30 @@ stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t f
   if (steps > STEPS_MAX) {
     return STEPPER_ERR_STEPS;
   }
-  return stepper_move(axis, (uint32_t)steps, (delta > 0) ? 1U : 0U, freq_hz);
+  return move_impl(axis, (uint32_t)steps, (delta > 0) ? 1U : 0U, freq_hz, notify);
+}
+
+stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t freq_hz)
+{
+  return angle_impl(axis, angle_deg, freq_hz, 1U);
+}
+
+stepper_status_t stepper_move_to_angle_quiet(uint8_t axis, float angle_deg, uint32_t freq_hz)
+{
+  return angle_impl(axis, angle_deg, freq_hz, 0U);
+}
+
+int32_t stepper_steps_to_angle(uint8_t axis, float angle_deg)
+{
+  if (axis >= STEPPER_AXES || !isfinite(angle_deg)) {
+    return 0;
+  }
+  float target_f = angle_deg * st[axis].steps_per_deg;
+  if (target_f > 1.0e9f || target_f < -1.0e9f) {
+    return 0;
+  }
+  int32_t target = (int32_t)(target_f + (target_f >= 0.0f ? 0.5f : -0.5f)) + st[axis].zero_offset;
+  return target - st[axis].pos;
 }
 
 /**
@@ -360,7 +390,7 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
     if (st[a].remaining == 0U) {
       channel_stop(a);
       st[a].busy = 0;
-      st[a].done = 1;
+      st[a].done = st[a].notify;
     }
   }
 }

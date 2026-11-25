@@ -5,12 +5,14 @@
 #include "cmd_parser.h"
 #include "stepper.h"
 #include "usbd_cdc_if.h"
+#include "fmt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 
 extern USBD_HandleTypeDef hUsbDeviceHS;
 
@@ -18,6 +20,7 @@ extern USBD_HandleTypeDef hUsbDeviceHS;
 #define TX_SIZE     512U        /* степень двойки */
 #define TX_CHUNK    64U         /* размер пакета USB FS */
 #define MAX_TOKENS  6U
+#define ANGLE_DEF_FREQ  500UL   /* Гц, если freq не указан */
 
 /* ---- Кольцевые буферы (один писатель, один читатель) ---------------------- */
 
@@ -111,6 +114,7 @@ static void reply_stepper_err(stepper_status_t s)
     case STEPPER_ERR_FREQ:     reply_err("FREQ");     break;
     case STEPPER_ERR_BUSY:     reply_err("BUSY");     break;
     case STEPPER_ERR_DISABLED: reply_err("DISABLED"); break;
+    case STEPPER_ERR_PARAM:    reply_err("VALUE");    break;
     default:                   reply_err("INTERNAL"); break;
   }
 }
@@ -127,6 +131,22 @@ static int parse_long(const char *s, long *out)
   errno = 0;
   long v = strtol(s, &end, 10);
   if (errno != 0 || *end != '\0') {
+    return 0;
+  }
+  *out = v;
+  return 1;
+}
+
+/* Число с плавающей точкой строго по всему токену; NaN/Inf не принимаются. */
+static int parse_float(const char *s, float *out)
+{
+  char *end;
+  if (*s == '\0') {
+    return 0;
+  }
+  errno = 0;
+  float v = strtof(s, &end);
+  if (errno != 0 || *end != '\0' || !isfinite(v)) {
     return 0;
   }
   *out = v;
@@ -198,10 +218,12 @@ void cmd_execute(char *line)
   else if (strcmp(cmd, "STATUS") == 0) {
     if (n != 1U) { reply_err("ARGS"); return; }
     for (uint8_t a = 0; a < STEPPER_AXES; a++) {
-      char buf[48];
-      (void)snprintf(buf, sizeof(buf), "STATUS %u %u %u %ld\n",
+      char buf[64];
+      char ang[16];
+      fmt_fixed(ang, sizeof(ang), stepper_get_angle(a), 1U, 0);
+      (void)snprintf(buf, sizeof(buf), "STATUS %u %u %u %ld %s\n",
                      (unsigned)a, (unsigned)stepper_is_enabled(a),
-                     (unsigned)stepper_is_busy(a), (long)stepper_get_pos(a));
+                     (unsigned)stepper_is_busy(a), (long)stepper_get_pos(a), ang);
       tx_put(buf);
     }
   }
@@ -229,6 +251,63 @@ void cmd_execute(char *line)
       return;
     }
     stepper_status_t s = stepper_move(axis, (uint32_t)steps, (uint8_t)dir, (uint32_t)freq);
+    if (s == STEPPER_OK) { tx_put("OK\n"); } else { reply_stepper_err(s); }
+  }
+  else if (strcmp(cmd, "ANGLE") == 0 || strcmp(cmd, "HOME") == 0) {
+    float  deg  = 0.0f;
+    long   freq = (long)ANGLE_DEF_FREQ;
+    uint32_t nfreq;                 /* индекс токена freq */
+    if (cmd[0] == 'A') {
+      if (n != 3U && n != 4U) { reply_err("ARGS"); return; }
+      nfreq = 3U;
+    } else {
+      if (n != 2U && n != 3U) { reply_err("ARGS"); return; }
+      nfreq = 2U;
+    }
+    if (!get_axis(tok[1], &axis)) { return; }
+    if (cmd[0] == 'A' && !parse_float(tok[2], &deg)) { reply_err("VALUE"); return; }
+    if (n > nfreq) {
+      if (!parse_long(tok[nfreq], &freq) || freq < (long)STEPPER_FREQ_MIN || freq > (long)STEPPER_FREQ_MAX) {
+        reply_err("FREQ");
+        return;
+      }
+    }
+    stepper_status_t s = stepper_move_to_angle(axis, deg, (uint32_t)freq);
+    if (s == STEPPER_OK) {
+      tx_put("OK\n");
+    } else if (s == STEPPER_ERR_LIMIT) {
+      float lo, hi;
+      char a1[16], a2[16], a3[16], buf[80];
+      stepper_get_limits(axis, &lo, &hi);
+      fmt_fixed(a1, sizeof(a1), deg, 2U, 0);
+      fmt_fixed(a2, sizeof(a2), lo, 2U, 0);
+      fmt_fixed(a3, sizeof(a3), hi, 2U, 0);
+      (void)snprintf(buf, sizeof(buf), "ERR LIMIT %u %s %s %s\n", (unsigned)axis, a1, a2, a3);
+      tx_put(buf);
+    } else {
+      reply_stepper_err(s);
+    }
+  }
+  else if (strcmp(cmd, "CAL") == 0) {
+    float spd;
+    if (n != 3U) { reply_err("ARGS"); return; }
+    if (!get_axis(tok[1], &axis)) { return; }
+    if (!parse_float(tok[2], &spd)) { reply_err("VALUE"); return; }
+    stepper_status_t s = stepper_set_calibration(axis, spd);
+    if (s == STEPPER_OK) { tx_put("OK\n"); } else { reply_stepper_err(s); }
+  }
+  else if (strcmp(cmd, "LIMITS") == 0) {
+    float lo, hi;
+    if (n != 4U) { reply_err("ARGS"); return; }
+    if (!get_axis(tok[1], &axis)) { return; }
+    if (!parse_float(tok[2], &lo) || !parse_float(tok[3], &hi)) { reply_err("VALUE"); return; }
+    stepper_status_t s = stepper_set_limits(axis, lo, hi);
+    if (s == STEPPER_OK) { tx_put("OK\n"); } else { reply_stepper_err(s); }
+  }
+  else if (strcmp(cmd, "ZERO") == 0) {
+    if (n != 2U) { reply_err("ARGS"); return; }
+    if (!get_axis(tok[1], &axis)) { return; }
+    stepper_status_t s = stepper_set_zero(axis);
     if (s == STEPPER_OK) { tx_put("OK\n"); } else { reply_stepper_err(s); }
   }
   else {

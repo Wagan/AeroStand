@@ -7,13 +7,14 @@
   *   y=6    "AeroStand v0.1"   (Font20, по центру)
   *   y=30   ----------------
   *   y=36+86*k  Axis k  <ENABLED|DISABLED>  <IDLE|MOVING|--->
-  *   y+22       pos:<+000000>            <CW|CCW|-->
-  *   y+44       <freq>Hz rem:<N>         (только при движении)
+  *   y+22       ang:<+15.3> pos:<+306>   (угол, град; позиция, шаги)
+  *   y+44       <CW|CCW|--> <freq>Hz rem:<N>  (freq/rem только при движении)
   *   y=284  ----------------
   *   y=292  USB: <Connected|Not configured>
   */
 #include "lcd_status.h"
 #include "stepper.h"
+#include "fmt.h"
 #include "main.h"
 #include "usbd_def.h"
 #include "stm32f429i_discovery_lcd.h"
@@ -46,8 +47,11 @@ extern USBD_HandleTypeDef hUsbDeviceHS;
 
 #define X_DRV           (MARGIN_X + 7U * CHAR_W)     /* после "Axis k " */
 #define X_MOT           (MARGIN_X + 16U * CHAR_W)    /* после "Axis k ENABLED " */
-#define X_POS           (MARGIN_X + 4U * CHAR_W)     /* после "pos:" */
-#define X_DIR           (MARGIN_X + 17U * CHAR_W)
+#define X_ANG           (MARGIN_X + 4U * CHAR_W)     /* после "ang:" */
+#define X_POSLBL        (MARGIN_X + 11U * CHAR_W)    /* метка "pos:" */
+#define X_POS           (MARGIN_X + 15U * CHAR_W)    /* после "pos:" */
+#define X_DIR           (MARGIN_X)                   /* 3-я строка: направление */
+#define X_RUN           (MARGIN_X + 4U * CHAR_W)     /* 3-я строка: freq/rem */
 #define X_USB           (MARGIN_X + 5U * CHAR_W)     /* после "USB: " */
 
 #define FIELD_MAX       24U
@@ -59,8 +63,8 @@ typedef struct {
   uint8_t  valid;
 } field_t;
 
-/* Поля оси: драйвер, движение, позиция, направление, freq/rem. */
-enum { F_DRV, F_MOT, F_POS, F_DIR, F_RUN, F_COUNT };
+/* Поля оси: драйвер, движение, угол, позиция, направление, freq/rem. */
+enum { F_DRV, F_MOT, F_ANG, F_POS, F_DIR, F_RUN, F_COUNT };
 
 static field_t  axis_f[STEPPER_AXES][F_COUNT];
 static field_t  usb_f;
@@ -121,7 +125,8 @@ static void draw_frame(void)
     char label[8];
     (void)snprintf(label, sizeof(label), "Axis %u", (unsigned)a);
     draw_static_text(MARGIN_X, y + LINE1_DY, COLOR_TEXT, label);
-    draw_static_text(MARGIN_X, y + LINE2_DY, COLOR_TEXT, "pos:");
+    draw_static_text(MARGIN_X, y + LINE2_DY, COLOR_TEXT, "ang:");
+    draw_static_text(X_POSLBL, y + LINE2_DY, COLOR_TEXT, "pos:");
   }
   draw_static_text(MARGIN_X, USB_Y, COLOR_TEXT, "USB:");
 
@@ -165,14 +170,17 @@ static void update_axis(uint8_t a)
 
   /* Позиция и направление (направление - последнего движения; "--" если
    * драйвер выключен или движений с момента включения не было). */
-  (void)snprintf(buf, sizeof(buf), "%+06ld", (long)stepper_get_pos(a));
-  draw_field(&axis_f[a][F_POS], X_POS, y + LINE2_DY, 11U,
+  fmt_fixed(buf, sizeof(buf), stepper_get_angle(a), 1U, 1);
+  draw_field(&axis_f[a][F_ANG], X_ANG, y + LINE2_DY, 7U,
+             enabled ? COLOR_TEXT : COLOR_OFF, buf);
+  (void)snprintf(buf, sizeof(buf), "%+ld", (long)stepper_get_pos(a));
+  draw_field(&axis_f[a][F_POS], X_POS, y + LINE2_DY, 6U,
              enabled ? COLOR_TEXT : COLOR_OFF, buf);
   if (enabled && stepper_has_dir(a)) {
-    draw_field(&axis_f[a][F_DIR], X_DIR, y + LINE2_DY, 3U, COLOR_TEXT,
+    draw_field(&axis_f[a][F_DIR], X_DIR, y + LINE3_DY, 3U, COLOR_TEXT,
                stepper_get_dir(a) ? "CW" : "CCW");
   } else {
-    draw_field(&axis_f[a][F_DIR], X_DIR, y + LINE2_DY, 3U, COLOR_OFF, "--");
+    draw_field(&axis_f[a][F_DIR], X_DIR, y + LINE3_DY, 3U, COLOR_OFF, "--");
   }
 
   /* Частота и остаток шагов - только пока ось движется. */
@@ -180,9 +188,9 @@ static void update_axis(uint8_t a)
     (void)snprintf(buf, sizeof(buf), "%luHz rem:%lu",
                    (unsigned long)stepper_get_freq(a),
                    (unsigned long)stepper_get_remaining(a));
-    draw_field(&axis_f[a][F_RUN], MARGIN_X, y + LINE3_DY, 21U, COLOR_MOVING, buf);
+    draw_field(&axis_f[a][F_RUN], X_RUN, y + LINE3_DY, 17U, COLOR_MOVING, buf);
   } else {
-    draw_field(&axis_f[a][F_RUN], MARGIN_X, y + LINE3_DY, 21U, COLOR_TEXT, "");
+    draw_field(&axis_f[a][F_RUN], X_RUN, y + LINE3_DY, 17U, COLOR_TEXT, "");
   }
 }
 

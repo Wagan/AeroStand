@@ -22,7 +22,9 @@ typedef enum {
   STEPPER_ERR_DIR,        /* dir не 0/1 */
   STEPPER_ERR_FREQ,       /* freq вне 1..5000 */
   STEPPER_ERR_BUSY,       /* ось уже движется */
-  STEPPER_ERR_DISABLED    /* драйвер оси выключен */
+  STEPPER_ERR_DISABLED,   /* драйвер оси выключен */
+  STEPPER_ERR_LIMIT,      /* угол вне допустимого диапазона */
+  STEPPER_ERR_PARAM       /* неверный параметр калибровки/пределов */
 } stepper_status_t;
 
 /** Инициализация всех осей: EN=HIGH (драйвер выключен), pos=0. */
@@ -73,5 +75,34 @@ uint8_t stepper_get_dir(uint8_t axis);
 
 /** 1, если с момента включения драйвера оси было хотя бы одно движение. */
 uint8_t stepper_has_dir(uint8_t axis);
+
+/* ---- Углы и калибровка ---------------------------------------------------- */
+
+/**
+  * Коэффициент пересчёта, шагов на градус (> 0, конечный). По умолчанию 1.0.
+  * Позиция в шагах не меняется, меняется только пересчёт в угол.
+  */
+stepper_status_t stepper_set_calibration(uint8_t axis, float steps_per_degree);
+
+/** Допустимый диапазон углов, градусы (min < max). По умолчанию -90..+90. */
+stepper_status_t stepper_set_limits(uint8_t axis, float min_deg, float max_deg);
+
+/** Текущую позицию считать нулём (0 град). Ось не должна двигаться. */
+stepper_status_t stepper_set_zero(uint8_t axis);
+
+/**
+  * Переместить ось в угол angle_deg: цель в шагах = angle_deg * steps_per_degree
+  * + zero_offset, движение на разность с текущей позицией. Если угол вне
+  * [min, max] - STEPPER_ERR_LIMIT, ось не двигается. Если ось уже в цели -
+  * STEPPER_OK без импульсов (флаг "завершено" выставляется сразу).
+  */
+stepper_status_t stepper_move_to_angle(uint8_t axis, float angle_deg, uint32_t freq_hz);
+
+/** Текущий угол, градусы: (pos - zero_offset) / steps_per_degree. */
+float stepper_get_angle(uint8_t axis);
+
+/** Калибровочный коэффициент и пределы (для ответов об ошибках). */
+float stepper_get_calibration(uint8_t axis);
+void  stepper_get_limits(uint8_t axis, float *min_deg, float *max_deg);
 
 #endif /* STEPPER_H */

@@ -8,7 +8,7 @@ Educational HIL test bench for flight controller firmware and control surface te
 
 ## Тактирование
 
-HSE 8 МГц (bypass, MCO от ST-Link) → PLL (M=4, N=168, P=2, Q=7):
+HSI 16 МГц (HSE на плате не запускается) → PLL (M=8, N=168, P=2, Q=7): VCO 2 МГц × 168 = 336 МГц.
 
 | Шина | Частота |
 |---|---|

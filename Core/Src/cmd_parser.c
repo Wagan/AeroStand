@@ -243,10 +243,10 @@ void cmd_poll(void)
     char c = (char)rx_buf[rx_tail];
     rx_tail = (rx_tail + 1U) & (RX_SIZE - 1U);
 
-    if (c == '\n') {
+    if (c == '\n' || c == '\r') {   /* конец строки: LF, CR или CRLF */
       if (line_overflow) {
         reply_err("LINE TOO LONG");
-      } else {
+      } else if (line_len > 0U) {   /* пустая строка (в т.ч. LF после CR) - игнор */
         line_buf[line_len] = '\0';
         cmd_execute(line_buf);
       }
